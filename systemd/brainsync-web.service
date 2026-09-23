@@ -1,0 +1,14 @@
+[Unit]
+Description=BrainSync web dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=yukit
+WorkingDirectory=/home/yukit/BrainSync
+ExecStart=/home/yukit/BrainSync/venv/bin/uvicorn webapp:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

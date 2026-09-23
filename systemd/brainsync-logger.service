@@ -1,0 +1,16 @@
+[Unit]
+Description=BrainSync sensor logger (MH-Z19C + DHT20)
+After=multi-user.target
+
+[Service]
+Type=simple
+# シリアルコンソール無効化済みのため一般ユーザーで実行（/dev/serial0 は dialout グループで読める）
+User=yukit
+UMask=0002
+WorkingDirectory=/home/yukit/BrainSync
+ExecStart=/home/yukit/BrainSync/venv/bin/python /home/yukit/BrainSync/logger.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

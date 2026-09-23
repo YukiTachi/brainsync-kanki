@@ -1,0 +1,13 @@
+# 測定データ（ラズパイ上でのみ生成）
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# ダッシュボードが使う Chart.js（README の手順で取得する）
+static/chart.umd.min.js

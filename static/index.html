@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanki — BrainSync</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-co2:     #2a78d6;
+    --series-temp:    #eb6834;
+    --series-hum:     #1baf7a;
+    /* 黄色(カテゴリ4番目)は注意の基準線と見分けにくいので、不快指数には紫を使う */
+    --series-di:      #4a3aa7;
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical:#d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface:        #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-co2:     #3987e5;
+      --series-temp:    #d95926;
+      --series-hum:     #199e70;
+      --series-di:      #9085e9;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    padding: 24px 16px 48px;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 600; }
+  h1 .subtitle { font-size: 13px; font-weight: 400; color: var(--text-secondary); margin-left: 6px; }
+  .updated { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  @media (max-width: 640px) {
+    .tiles { gap: 8px; grid-template-columns: repeat(2, 1fr); }
+    .tile { padding: 10px 10px; }
+    .tile .value { font-size: 24px; }
+    .tile .unit { font-size: 12px; }
+    .badge { font-size: 11px; }
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .tile .label { font-size: 13px; color: var(--text-secondary); }
+  .tile .value { font-size: 32px; font-weight: 600; margin-top: 2px; }
+  .tile .unit { font-size: 14px; font-weight: 400; color: var(--text-secondary); margin-left: 2px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+  .badge .icon { font-weight: 700; }
+  .badge .icon.neutral { color: var(--text-muted); }
+
+  .filters { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters button {
+    font: inherit; font-size: 13px;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .filters button:hover { color: var(--text-primary); }
+  .filters button[aria-pressed="true"] {
+    color: var(--text-primary);
+    font-weight: 600;
+    border-color: var(--baseline);
+  }
+  .filters button[aria-pressed="true"]::before { content: "✓ "; font-weight: 700; }
+
+  .controls { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .controls .filters { margin-bottom: 0; }
+  .custom-range {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .custom-range input {
+    font: inherit; font-size: 13px;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 8px;
+  }
+  .custom-range input:focus-visible, .filters button:focus-visible {
+    outline: 2px solid var(--series-co2); outline-offset: 1px;
+  }
+  .custom-range .time-span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .custom-range.active input { border-color: var(--baseline); }
+  .custom-range button {
+    font: inherit; font-size: 13px; font-weight: 600;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--baseline);
+    border-radius: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .range-label { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; min-height: 1.4em; }
+  .range-label .error { color: var(--status-critical); font-weight: 600; }
+  .charts.loading { opacity: 0.5; transition: opacity 0.15s; }
+  table.daily td button.day-link {
+    font: inherit; color: var(--text-primary);
+    background: none; border: none; padding: 0;
+    text-decoration: underline; text-decoration-color: var(--baseline); text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  table.daily td button.day-link:hover { text-decoration-color: currentColor; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card h2 .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid; border-radius: 1px; }
+  .card h2 .stats { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .chart-wrap { position: relative; height: 200px; }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 24px 0; text-align: center; }
+  .stale { color: var(--status-critical); font-weight: 600; }
+
+  table.daily { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.daily th, table.daily td { padding: 7px 8px; text-align: right; white-space: nowrap; }
+  table.daily th:first-child, table.daily td:first-child { text-align: left; }
+  table.daily th {
+    font-weight: 500; color: var(--text-muted); font-size: 12px;
+    border-bottom: 1px solid var(--baseline);
+  }
+  table.daily td { border-bottom: 1px solid var(--grid); color: var(--text-primary); }
+  table.daily tr:last-child td { border-bottom: none; }
+  table.daily .warn-icon { font-weight: 700; margin-right: 3px; }
+  .table-scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Kanki <span class="subtitle">BrainSync 室内環境モニター</span></h1>
+    <div class="updated" id="updated">読み込み中…</div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="label">CO2濃度</div>
+      <div class="value"><span id="v-co2">–</span><span class="unit">ppm</span></div>
+      <div class="badge" id="co2-badge"></div>
+    </div>
+    <div class="tile">
+      <div class="label">温度</div>
+      <div class="value"><span id="v-temp">–</span><span class="unit">℃</span></div>
+      <div class="badge" id="temp-badge"></div>
+    </div>
+    <div class="tile">
+      <div class="label">湿度</div>
+      <div class="value"><span id="v-hum">–</span><span class="unit">%</span></div>
+      <div class="badge" id="hum-badge"></div>
+    </div>
+    <div class="tile">
+      <div class="label">不快指数</div>
+      <div class="value"><span id="v-di">–</span></div>
+      <div class="badge" id="di-badge"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="filters" id="filters" role="group" aria-label="表示期間">
+      <button data-hours="1">1時間</button>
+      <button data-hours="6">6時間</button>
+      <button data-hours="24" aria-pressed="true">24時間</button>
+      <button data-hours="168">7日</button>
+      <button data-hours="720">30日</button>
+    </div>
+    <form class="custom-range" id="custom-range" aria-label="日時指定">
+      <label for="cr-date">日時指定</label>
+      <input type="date" id="cr-date" required>
+      <span class="time-span">
+        <input type="time" id="cr-from" value="00:00" required aria-label="開始時刻">
+        <span>〜</span>
+        <input type="time" id="cr-to" value="00:00" required aria-label="終了時刻" title="開始以前の時刻にすると翌日までになります">
+        <button type="submit">表示</button>
+      </span>
+    </form>
+  </div>
+  <div class="range-label" id="range-label" aria-live="polite"></div>
+
+  <div class="charts" id="charts">
+  <div class="card">
+    <h2><span class="key" style="border-color: var(--series-co2)"></span>CO2濃度 (ppm)<span class="stats" id="stats-co2"></span></h2>
+    <div class="chart-wrap"><canvas id="chart-co2"></canvas></div>
+  </div>
+  <div class="card">
+    <h2><span class="key" style="border-color: var(--series-temp)"></span>温度 (℃)<span class="stats" id="stats-temp"></span></h2>
+    <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+  </div>
+  <div class="card">
+    <h2><span class="key" style="border-color: var(--series-hum)"></span>湿度 (%)<span class="stats" id="stats-hum"></span></h2>
+    <div class="chart-wrap"><canvas id="chart-hum"></canvas></div>
+  </div>
+  <div class="card">
+    <h2><span class="key" style="border-color: var(--series-di)"></span>不快指数<span class="stats" id="stats-di"></span></h2>
+    <div class="chart-wrap"><canvas id="chart-di"></canvas></div>
+  </div>
+  </div>
+
+  <div class="card">
+    <h2>日次サマリー（直近7日）<span class="stats">日付を押すとその日のグラフを表示</span></h2>
+    <div class="table-scroll">
+      <table class="daily">
+        <thead>
+          <tr>
+            <th>日付</th><th>CO2平均</th><th>CO2最大</th><th>1000ppm超</th><th>温度平均</th><th>湿度平均</th><th>記録率</th>
+          </tr>
+        </thead>
+        <tbody id="daily-body"><tr><td colspan="7" class="empty">読み込み中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="/static/chart.umd.min.js"></script>
+<script>
+"use strict";
+
+const REFRESH_MS = 60_000;
+// 表示期間: { hours } なら直近 N 時間、{ start, end }（UNIX秒、end は含まない）なら日時指定
+let range = { hours: 24 };
+const charts = {};
+
+const isCustomRange = () => range.start != null;
+const rangeQuery = () => isCustomRange() ? `start=${range.start}&end=${range.end}` : `hours=${range.hours}`;
+const rangeSpanHours = () => isCustomRange() ? (range.end - range.start) / 3600 : range.hours;
+
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// ツールチップ表示中、アクティブなX位置に縦のヘアラインを引く
+const crosshair = {
+  id: "crosshair",
+  afterDraw(chart) {
+    const active = chart.tooltip?.getActiveElements();
+    if (!active?.length) return;
+    const x = active[0].element.x;
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = cssVar("--baseline");
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+// 基準線（例: CO2 1000ppm）。options.plugins.refLine = { value, label, colorVar } で指定
+const refLine = {
+  id: "refLine",
+  beforeDatasetsDraw(chart, _args, cfg) {
+    if (!cfg || cfg.value == null) return;
+    const y = chart.scales.y.getPixelForValue(cfg.value);
+    const { left, right, top, bottom } = chart.chartArea;
+    if (y < top || y > bottom) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = cssVar(cfg.colorVar);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+
+    // ラベルは線の右端に「⚠（状態色）＋説明（文字色）」で置く。色だけに頼らない。
+    // 通常は線の上だが、その位置にデータの線が来ていれば線の下に回す
+    const font = "11px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    const boldFont = "bold 11px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    ctx.font = font;
+    const labelWidth = ctx.measureText(cfg.label).width;
+    ctx.font = boldFont;
+    const iconWidth = ctx.measureText("⚠ ").width;
+    const zoneLeft = right - labelWidth - iconWidth - 8;
+    const LABEL_H = 16;
+    const points = chart.getDatasetMeta(0).data.filter(p => !p.skip && p.x >= zoneLeft && p.x <= right);
+    const hitsAbove = points.some(p => p.y >= y - LABEL_H && p.y <= y);
+    const below = hitsAbove && !points.some(p => p.y >= y && p.y <= y + LABEL_H);
+    const textY = below ? y + 3 : y - 3;
+
+    ctx.textBaseline = below ? "top" : "bottom";
+    ctx.textAlign = "right";
+    ctx.font = font;
+    ctx.fillStyle = cssVar("--text-secondary");
+    ctx.fillText(cfg.label, right, textY);
+    ctx.font = boldFont;
+    ctx.fillStyle = cssVar(cfg.colorVar);
+    ctx.fillText("⚠ ", right - labelWidth, textY);
+    ctx.restore();
+  },
+};
+
+function makeChart(canvasId, colorVar, opts = {}) {
+  const color = cssVar(colorVar);
+  return new Chart(document.getElementById(canvasId), {
+    type: "line",
+    data: { labels: [], datasets: [{
+      data: [],
+      borderColor: color,
+      backgroundColor: hexToRgba(color, 0.1),
+      fill: true,
+      borderWidth: 2,
+      borderJoinStyle: "round",
+      borderCapStyle: "round",
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHoverBackgroundColor: color,
+      pointHoverBorderColor: cssVar("--surface"),
+      pointHoverBorderWidth: 2,
+      spanGaps: false,  // 欠測区間は線を切って見えるようにする
+    }]},
+    plugins: [crosshair, refLine],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        refLine: opts.refLine ?? null,
+        tooltip: {
+          backgroundColor: cssVar("--surface"),
+          titleColor: cssVar("--text-secondary"),
+          titleFont: { weight: "normal", size: 11 },
+          bodyColor: cssVar("--text-primary"),
+          bodyFont: { weight: "600", size: 14 },
+          borderColor: cssVar("--border"),
+          borderWidth: 1,
+          displayColors: false,
+          padding: 10,
+          callbacks: {
+            title: items => items.length ? formatDateTime(Number(items[0].label)) : "",
+            label: ctx => ctx.raw == null ? "欠測" : `${ctx.formattedValue} ${opts.unit ?? ""}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: cssVar("--baseline") },
+          ticks: {
+            color: cssVar("--text-muted"), maxTicksLimit: 8, maxRotation: 0, font: { size: 11 },
+            callback(value) { return formatTime(Number(this.getLabelForValue(value)), rangeSpanHours()); },
+          },
+        },
+        y: {
+          grid: { color: cssVar("--grid"), lineWidth: 1 },
+          border: { display: false },
+          ticks: { color: cssVar("--text-muted"), maxTicksLimit: 5, font: { size: 11 } },
+          ...(opts.yMin !== undefined ? { suggestedMin: opts.yMin } : {}),
+          ...(opts.yMax !== undefined ? { suggestedMax: opts.yMax } : {}),
+        },
+      },
+    },
+  });
+}
+
+function formatTime(ts, rangeHours) {
+  const d = new Date(ts * 1000);
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return rangeHours <= 48 ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function formatDateTime(ts) {
+  const d = new Date(ts * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]}) ` +
+    `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// <input type="date"> 用の YYYY-MM-DD（ローカル日付）
+function toDateValue(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// 評価はアイコン＋文言で返す（colorVar が null のアイコンは中立の灰色）
+const GOOD = "--status-good", WARN = "--status-warning", SERIOUS = "--status-serious", CRITICAL = "--status-critical";
+
+function evaluateCo2(co2) {
+  if (co2 < 1000) return { icon: "✓", text: co2 < 600 ? "優良（新鮮な空気）" : "良好", colorVar: GOOD };
+  if (co2 < 1500) return { icon: "⚠", text: "注意（換気推奨）", colorVar: WARN };
+  return { icon: "✗", text: "要換気", colorVar: CRITICAL };
+}
+
+// しきい値は dht20.py の evaluate_temperature / evaluate_humidity と同じ
+function evaluateTemperature(t) {
+  if (t < 18) return { icon: "⚠", text: "寒い", colorVar: WARN };
+  if (t < 22) return { icon: "・", text: "やや涼しい", colorVar: null };
+  if (t < 26) return { icon: "✓", text: "快適", colorVar: GOOD };
+  if (t < 28) return { icon: "・", text: "やや暑い", colorVar: null };
+  return { icon: "⚠", text: "暑い", colorVar: WARN };
+}
+
+function evaluateHumidity(h) {
+  if (h < 30) return { icon: "⚠", text: "乾燥（加湿推奨）", colorVar: WARN };
+  if (h < 40) return { icon: "・", text: "やや乾燥", colorVar: null };
+  if (h < 60) return { icon: "✓", text: "快適", colorVar: GOOD };
+  if (h < 70) return { icon: "・", text: "やや多湿", colorVar: null };
+  return { icon: "⚠", text: "多湿（除湿推奨）", colorVar: WARN };
+}
+
+function evaluateDiscomfort(di) {
+  if (di < 55) return { icon: "⚠", text: "寒い", colorVar: WARN };
+  if (di < 60) return { icon: "・", text: "肌寒い", colorVar: null };
+  if (di < 65) return { icon: "・", text: "何も感じない", colorVar: null };
+  if (di < 70) return { icon: "✓", text: "快い", colorVar: GOOD };
+  if (di < 75) return { icon: "✓", text: "暑くない", colorVar: GOOD };
+  if (di < 80) return { icon: "⚠", text: "やや暑い", colorVar: WARN };
+  if (di < 85) return { icon: "⚠", text: "暑くて汗が出る", colorVar: SERIOUS };
+  return { icon: "✗", text: "暑くてたまらない", colorVar: CRITICAL };
+}
+
+function renderBadge(elId, value, evaluate) {
+  const badge = document.getElementById(elId);
+  badge.textContent = "";
+  if (value == null) return;
+  const ev = evaluate(value);
+  const icon = document.createElement("span");
+  icon.className = ev.colorVar ? "icon" : "icon neutral";
+  if (ev.colorVar) icon.style.color = cssVar(ev.colorVar);
+  icon.textContent = ev.icon;
+  badge.append(icon, document.createTextNode(ev.text));
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function refreshLatest() {
+  const latest = await fetchJson("/api/latest");
+  if (!latest) {
+    document.getElementById("updated").textContent = "まだ測定データがありません";
+    return;
+  }
+  document.getElementById("v-co2").textContent = latest.co2 ?? "–";
+  document.getElementById("v-temp").textContent = latest.temperature != null ? latest.temperature.toFixed(1) : "–";
+  document.getElementById("v-hum").textContent = latest.humidity != null ? latest.humidity.toFixed(0) : "–";
+  document.getElementById("v-di").textContent = latest.discomfort != null ? latest.discomfort.toFixed(1) : "–";
+
+  renderBadge("co2-badge", latest.co2, evaluateCo2);
+  renderBadge("temp-badge", latest.temperature, evaluateTemperature);
+  renderBadge("hum-badge", latest.humidity, evaluateHumidity);
+  renderBadge("di-badge", latest.discomfort, evaluateDiscomfort);
+  const d = new Date(latest.ts * 1000);
+  const el = document.getElementById("updated");
+  el.textContent = `最終測定: ${d.toLocaleString("ja-JP")}`;
+  el.classList.remove("stale");
+
+  // 測定が止まっているように見えるときは警告（3周期以上の遅れ）
+  const ageMin = (Date.now() / 1000 - latest.ts) / 60;
+  if (ageMin > 3) {
+    el.classList.add("stale");
+    const warn = document.createElement("span");
+    warn.textContent = ` ⚠ ${Math.round(ageMin)}分前 — 測定が停止している可能性があります`;
+    el.appendChild(warn);
+  }
+}
+
+// 欠けているバケットを null で埋めて、欠測区間でグラフの線が切れるようにする。
+// 指定期間の端から端まで埋めるので、日時指定で前後にデータがない部分も空白として見える
+function fillGaps(points, bucketSec, start, end) {
+  const byT = new Map(points.map(p => [p.t, p]));
+  const first = Math.floor(start / bucketSec) * bucketSec;
+  const last = Math.floor((Math.min(end, Date.now() / 1000) - 1) / bucketSec) * bucketSec;
+  const filled = [];
+  for (let t = first; t <= last; t += bucketSec) {
+    filled.push(byT.get(t) ?? { t, co2: null, temperature: null, humidity: null, discomfort: null });
+  }
+  return filled;
+}
+
+// 「9/12(土) 22:00 〜 9/13(日) 6:00」形式。同じ日に収まるなら終了は時刻だけ、翌0時ちょうどは 24:00
+function describeRange(start, end) {
+  const s = new Date(start * 1000);
+  const e = new Date(end * 1000);
+  const lastMinute = new Date((end - 60) * 1000);
+  if (lastMinute.toDateString() === s.toDateString()) {
+    const endHm = e.toDateString() === s.toDateString() ? formatDateTime(end).split(" ")[1] : "24:00";
+    return `${formatDateTime(start)} 〜 ${endHm}`;
+  }
+  return `${formatDateTime(start)} 〜 ${formatDateTime(end)}`;
+}
+
+function setRangeLabel(text, isError = false) {
+  const el = document.getElementById("range-label");
+  el.textContent = "";
+  const span = document.createElement("span");
+  if (isError) span.className = "error";
+  span.textContent = text;
+  el.appendChild(span);
+}
+
+async function refreshHistory() {
+  const wrap = document.getElementById("charts");
+  wrap.classList.add("loading");
+  try {
+    const data = await fetchJson(`/api/history?${rangeQuery()}`);
+    if (!data) {
+      setRangeLabel("データを取得できませんでした", true);
+      return;
+    }
+    const points = fillGaps(data.points, data.bucket_sec, data.start, data.end);
+    const fields = { "chart-co2": "co2", "chart-temp": "temperature", "chart-hum": "humidity", "chart-di": "discomfort" };
+    for (const [id, field] of Object.entries(fields)) {
+      charts[id].data.labels = points.map(p => p.t);
+      charts[id].data.datasets[0].data = points.map(p => p[field]);
+      charts[id].update();
+    }
+    const label = `表示中: ${describeRange(data.start, data.end)}`;
+    setRangeLabel(data.points.length ? label : `${label} — この期間のデータはありません`);
+  } finally {
+    wrap.classList.remove("loading");
+  }
+}
+
+function formatDuration(minutes) {
+  if (minutes == null || minutes === 0) return "0分";
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h > 0 ? `${h}時間${m > 0 ? m + "分" : ""}` : `${m}分`;
+}
+
+async function refreshStats() {
+  const s = await fetchJson(`/api/stats?${rangeQuery()}`);
+  if (!s || !s.samples) {
+    for (const id of ["stats-co2", "stats-temp", "stats-hum", "stats-di"]) document.getElementById(id).textContent = "";
+    return;
+  }
+  const f = v => v != null ? v : "–";
+  document.getElementById("stats-co2").textContent =
+    `最小 ${f(s.co2_min)} · 平均 ${f(s.co2_avg)} · 最大 ${f(s.co2_max)}` +
+    (s.co2_high_minutes ? ` · 1000ppm超 ${formatDuration(s.co2_high_minutes)}` : "");
+  document.getElementById("stats-temp").textContent =
+    `最小 ${f(s.temp_min)} · 平均 ${f(s.temp_avg)} · 最大 ${f(s.temp_max)}`;
+  document.getElementById("stats-hum").textContent =
+    `最小 ${f(s.hum_min)} · 平均 ${f(s.hum_avg)} · 最大 ${f(s.hum_max)}`;
+  document.getElementById("stats-di").textContent =
+    `最小 ${f(s.di_min)} · 平均 ${f(s.di_avg)} · 最大 ${f(s.di_max)}`;
+}
+
+// その日の記録率（%）。当日は経過時間分だけを分母にする
+function coveragePct(day) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const expected = day.day === today
+    ? Math.max(1, now.getHours() * 60 + now.getMinutes())
+    : 1440;
+  return Math.min(100, Math.round(day.samples / expected * 100));
+}
+
+async function refreshDaily() {
+  const data = await fetchJson("/api/daily?days=7");
+  const tbody = document.getElementById("daily-body");
+  tbody.textContent = "";
+  if (!data || !data.days.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.className = "empty";
+    td.textContent = "まだデータがありません";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const day of data.days) {
+    const tr = document.createElement("tr");
+    const cells = [
+      day.day.slice(5).replace("-", "/"),
+      day.co2_avg != null ? `${day.co2_avg} ppm` : "–",
+      day.co2_max != null ? `${day.co2_max} ppm` : "–",
+      formatDuration(day.co2_high_minutes ?? 0),
+      day.temp_avg != null ? `${day.temp_avg} ℃` : "–",
+      day.hum_avg != null ? `${day.hum_avg} %` : "–",
+      `${coveragePct(day)} %`,
+    ];
+    cells.forEach((text, i) => {
+      const td = document.createElement("td");
+      if (i === 0) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "day-link";
+        btn.textContent = text;
+        btn.setAttribute("aria-label", `${text} のグラフを表示`);
+        btn.addEventListener("click", () => {
+          setCustomInputs(day.day, "00:00", "00:00");
+          applyCustomRange();
+          document.querySelector(".controls").scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        td.appendChild(btn);
+        tr.appendChild(td);
+        return;
+      }
+      // CO2最大が換気ラインを超えた日は警告アイコンを添える（色だけに頼らない）
+      if (i === 2 && day.co2_max >= 1000) {
+        const icon = document.createElement("span");
+        icon.className = "warn-icon";
+        icon.style.color = cssVar(day.co2_max >= 1500 ? "--status-critical" : "--status-warning");
+        icon.textContent = "⚠";
+        td.appendChild(icon);
+      }
+      td.appendChild(document.createTextNode(text));
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+function buildCharts() {
+  for (const id of Object.keys(charts)) charts[id].destroy();
+  // 基準線が常に見えるよう、縦軸の上限を基準値より少し上まで確保する
+  charts["chart-co2"] = makeChart("chart-co2", "--series-co2", {
+    unit: "ppm", yMin: 400, yMax: 1100,
+    refLine: { value: 1000, label: "1000 ppm 換気の目安", colorVar: "--status-warning" },
+  });
+  charts["chart-temp"] = makeChart("chart-temp", "--series-temp", { unit: "℃" });
+  charts["chart-hum"] = makeChart("chart-hum", "--series-hum", { unit: "%", yMin: 0, yMax: 100 });
+  charts["chart-di"] = makeChart("chart-di", "--series-di", {
+    yMin: 65, yMax: 80,
+    refLine: { value: 75, label: "75 不快を感じ始める", colorVar: "--status-warning" },
+  });
+}
+
+function setPresetPressed(hours) {
+  for (const b of document.querySelectorAll("#filters button")) {
+    b.setAttribute("aria-pressed", String(Number(b.dataset.hours) === hours));
+  }
+  document.getElementById("custom-range").classList.toggle("active", hours == null);
+}
+
+// 期間を URL の # に残して、再読み込みやブックマークで同じ表示に戻れるようにする
+function saveRangeToUrl() {
+  const hash = isCustomRange() ? `#start=${range.start}&end=${range.end}` : `#hours=${range.hours}`;
+  history.replaceState(null, "", hash);
+}
+
+function loadRangeFromUrl() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const start = Number(p.get("start")), end = Number(p.get("end")), hours = Number(p.get("hours"));
+  if (start > 0 && end > start) {
+    const s = new Date(start * 1000), e = new Date(end * 1000);
+    const hm = d => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    setCustomInputs(toDateValue(s), hm(s), hm(e));
+    return { start, end };
+  }
+  return hours > 0 ? { hours } : { hours: 24 };
+}
+
+function setCustomInputs(date, from, to) {
+  document.getElementById("cr-date").value = date;
+  document.getElementById("cr-from").value = from;
+  document.getElementById("cr-to").value = to;
+}
+
+function applyRange(newRange) {
+  range = newRange;
+  setPresetPressed(isCustomRange() ? null : range.hours);
+  saveRangeToUrl();
+  refreshHistory();
+  refreshStats();
+}
+
+// 日付 + 開始/終了時刻 → {start, end}。終了が開始以前なら翌日まで（例: 22:00〜6:00）
+function applyCustomRange() {
+  const date = document.getElementById("cr-date").value;
+  const from = document.getElementById("cr-from").value;
+  const to = document.getElementById("cr-to").value;
+  if (!date || !from || !to) {
+    setRangeLabel("日付と時刻を入力してください", true);
+    return;
+  }
+  const startDate = new Date(`${date}T${from}`);
+  const endDate = new Date(`${date}T${to}`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    setRangeLabel("日付または時刻の形式が正しくありません", true);
+    return;
+  }
+  if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+  if (startDate.getTime() > Date.now()) {
+    setRangeLabel("開始が未来の日時になっています", true);
+    return;
+  }
+  applyRange({ start: Math.floor(startDate.getTime() / 1000), end: Math.floor(endDate.getTime() / 1000) });
+}
+
+document.getElementById("filters").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-hours]");
+  if (!btn) return;
+  applyRange({ hours: Number(btn.dataset.hours) });
+});
+
+document.getElementById("custom-range").addEventListener("submit", e => {
+  e.preventDefault();
+  applyCustomRange();
+});
+
+// OSのテーマ切り替えに追従（CSS変数が変わるのでチャートを作り直す）
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  buildCharts();
+  refreshHistory();
+});
+
+const dateInput = document.getElementById("cr-date");
+dateInput.max = toDateValue(new Date());
+dateInput.value = toDateValue(new Date());
+setCustomInputs(dateInput.value, "00:00", "00:00");
+range = loadRangeFromUrl();
+setPresetPressed(isCustomRange() ? null : range.hours);
+
+buildCharts();
+refreshLatest();
+refreshHistory();
+refreshStats();
+refreshDaily();
+setInterval(() => { refreshLatest(); refreshHistory(); refreshStats(); refreshDaily(); }, REFRESH_MS);
+</script>
+</body>
+</html>
