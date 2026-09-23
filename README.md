@@ -62,6 +62,25 @@ sudo systemctl enable --now brainsync-logger brainsync-web
 
 `http://<ラズパイのIPアドレス>:8000` でダッシュボードが開きます（同じ LAN 内から）。
 
+### 更新の反映
+
+ラズパイ上の `~/BrainSync` はこのリポジトリのクローンです（`data/` と `venv/` は git の管理外）。
+コードを直したら、手元でコミットして push し、ラズパイで pull します。
+
+```bash
+# 手元で
+git add -A && git commit -m "..." && git push
+
+# ラズパイで
+cd ~/BrainSync
+git pull
+sudo systemctl restart brainsync-web     # webapp.py / static/ を変えたとき
+sudo systemctl restart brainsync-logger  # logger.py / dht20.py を変えたとき
+```
+
+ラズパイからの push には GitHub の認証が必要です（`gh auth login`、または書き込み可能なデプロイキーの登録）。
+設定していない場合、ラズパイは pull のみ行えます。
+
 ## 構成
 
 | ファイル | 役割 |
