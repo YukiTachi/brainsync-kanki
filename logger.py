@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""CO2・温湿度を定期測定して SQLite に記録する常駐プログラム
+"""CO2・温湿度・照度を定期測定して SQLite に記録する常駐プログラム
 
-MH-Z19C (シリアル) と DHT20 (I2C) を INTERVAL 秒ごとに読み取り、
+MH-Z19C (シリアル)、DHT20 (I2C)、VEML7700 (I2C) を INTERVAL 秒ごとに読み取り、
 data/brainsync.db の measurements テーブルに追記する。
 シリアルポートの権限のため root で動かす前提 (systemd: brainsync-logger.service)。
 """
@@ -17,6 +17,7 @@ sys.path.insert(0, BASE_DIR)
 
 import mh_z19  # noqa: E402
 from dht20 import DHT20  # noqa: E402
+from veml7700 import VEML7700  # noqa: E402
 
 DB_PATH = os.path.join(BASE_DIR, "data", "brainsync.db")
 INTERVAL = 60          # 測定間隔（秒）
@@ -44,9 +45,15 @@ def init_db():
                ts          INTEGER PRIMARY KEY,
                co2         INTEGER,
                temperature REAL,
-               humidity    REAL
+               humidity    REAL,
+               lux         REAL
            )"""
     )
+    # 既存の DB には lux 列がないので、なければ追加する
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(measurements)")}
+    if "lux" not in columns:
+        conn.execute("ALTER TABLE measurements ADD COLUMN lux REAL")
+        log.info("measurements テーブルに lux 列を追加しました")
     conn.commit()
     return conn
 
@@ -77,6 +84,16 @@ def read_dht(sensor):
     return None, None
 
 
+def read_lux(sensor):
+    for attempt in range(MAX_RETRIES):
+        try:
+            return round(sensor.read(), 1)
+        except OSError as e:
+            log.warning("VEML7700 読み取り失敗 (%d/%d): %s", attempt + 1, MAX_RETRIES, e)
+            time.sleep(RETRY_DELAY)
+    return None
+
+
 def wait_for_warmup():
     """電源投入直後（ブート直後）のみウォームアップを待つ"""
     with open("/proc/uptime") as f:
@@ -99,6 +116,12 @@ def main():
     except OSError as e:
         log.warning("DHT20 初期化失敗（温湿度なしで続行）: %s", e)
 
+    light = VEML7700()
+    try:
+        light.init()
+    except OSError as e:
+        log.warning("VEML7700 初期化失敗（照度なしで続行）: %s", e)
+
     wait_for_warmup()
     log.info("測定開始（間隔 %d 秒）", INTERVAL)
 
@@ -106,19 +129,22 @@ def main():
         ts = int(time.time())
         co2 = read_co2()
         temp, hum = read_dht(dht)
+        lux = read_lux(light)
 
-        if co2 is None and temp is None:
+        if co2 is None and temp is None and lux is None:
             log.error("全センサーの読み取りに失敗、この周期はスキップ")
         else:
             conn.execute(
-                "INSERT OR REPLACE INTO measurements (ts, co2, temperature, humidity) VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO measurements (ts, co2, temperature, humidity, lux)"
+                " VALUES (?, ?, ?, ?, ?)",
                 (ts, co2, round(temp, 2) if temp is not None else None,
-                 round(hum, 2) if hum is not None else None),
+                 round(hum, 2) if hum is not None else None, lux),
             )
             conn.commit()
-            log.info("記録: co2=%s ppm temp=%s ℃ hum=%s %%",
+            log.info("記録: co2=%s ppm temp=%s ℃ hum=%s %% lux=%s",
                      co2, f"{temp:.1f}" if temp is not None else "-",
-                     f"{hum:.1f}" if hum is not None else "-")
+                     f"{hum:.1f}" if hum is not None else "-",
+                     f"{lux:.1f}" if lux is not None else "-")
 
         # 次の分境界まで待機（SIGTERM に素早く反応できるよう小刻みに）
         next_ts = ts + INTERVAL - (ts % INTERVAL) if ts % INTERVAL else ts + INTERVAL
@@ -128,6 +154,7 @@ def main():
     log.info("終了します")
     conn.close()
     dht.close()
+    light.close()
 
 
 if __name__ == "__main__":

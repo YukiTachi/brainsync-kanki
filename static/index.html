@@ -20,6 +20,7 @@
     --series-hum:     #1baf7a;
     /* 黄色(カテゴリ4番目)は注意の基準線と見分けにくいので、不快指数には紫を使う */
     --series-di:      #4a3aa7;
+    --series-lux:     #eda100;
     --status-good:    #0ca30c;
     --status-warning: #fab219;
     --status-serious: #ec835a;
@@ -40,6 +41,7 @@
       --series-temp:    #d95926;
       --series-hum:     #199e70;
       --series-di:      #9085e9;
+      --series-lux:     #c98500;
     }
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -55,7 +57,7 @@
   h1 .subtitle { font-size: 13px; font-weight: 400; color: var(--text-secondary); margin-left: 6px; }
   .updated { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
-  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
   @media (max-width: 640px) {
     .tiles { gap: 8px; grid-template-columns: repeat(2, 1fr); }
     .tile { padding: 10px 10px; }
@@ -188,6 +190,11 @@
       <div class="value"><span id="v-di">–</span></div>
       <div class="badge" id="di-badge"></div>
     </div>
+    <div class="tile">
+      <div class="label">照度</div>
+      <div class="value"><span id="v-lux">–</span><span class="unit">lx</span></div>
+      <div class="badge" id="lux-badge"></div>
+    </div>
   </div>
 
   <div class="controls">
@@ -227,6 +234,10 @@
   <div class="card">
     <h2><span class="key" style="border-color: var(--series-di)"></span>不快指数<span class="stats" id="stats-di"></span></h2>
     <div class="chart-wrap"><canvas id="chart-di"></canvas></div>
+  </div>
+  <div class="card">
+    <h2><span class="key" style="border-color: var(--series-lux)"></span>照度 (lx)<span class="stats" id="stats-lux"></span></h2>
+    <div class="chart-wrap"><canvas id="chart-lux"></canvas></div>
   </div>
   </div>
 
@@ -450,6 +461,16 @@ function evaluateDiscomfort(di) {
   return { icon: "✗", text: "暑くてたまらない", colorVar: CRITICAL };
 }
 
+function evaluateLux(lux) {
+  if (lux < 1) return { icon: "・", text: "ほぼ暗闇", colorVar: null };
+  if (lux < 50) return { icon: "・", text: "暗い（就寝向き）", colorVar: null };
+  if (lux < 200) return { icon: "・", text: "やや暗い", colorVar: null };
+  if (lux < 500) return { icon: "✓", text: "室内照明として適切", colorVar: GOOD };
+  if (lux < 1000) return { icon: "・", text: "明るい", colorVar: null };
+  if (lux < 10000) return { icon: "・", text: "とても明るい（窓際）", colorVar: null };
+  return { icon: "・", text: "屋外並み", colorVar: null };
+}
+
 function renderBadge(elId, value, evaluate) {
   const badge = document.getElementById(elId);
   badge.textContent = "";
@@ -478,11 +499,14 @@ async function refreshLatest() {
   document.getElementById("v-temp").textContent = latest.temperature != null ? latest.temperature.toFixed(1) : "–";
   document.getElementById("v-hum").textContent = latest.humidity != null ? latest.humidity.toFixed(0) : "–";
   document.getElementById("v-di").textContent = latest.discomfort != null ? latest.discomfort.toFixed(1) : "–";
+  document.getElementById("v-lux").textContent =
+    latest.lux != null ? (latest.lux >= 100 ? Math.round(latest.lux).toLocaleString() : latest.lux.toFixed(1)) : "–";
 
   renderBadge("co2-badge", latest.co2, evaluateCo2);
   renderBadge("temp-badge", latest.temperature, evaluateTemperature);
   renderBadge("hum-badge", latest.humidity, evaluateHumidity);
   renderBadge("di-badge", latest.discomfort, evaluateDiscomfort);
+  renderBadge("lux-badge", latest.lux, evaluateLux);
   const d = new Date(latest.ts * 1000);
   const el = document.getElementById("updated");
   el.textContent = `最終測定: ${d.toLocaleString("ja-JP")}`;
@@ -506,7 +530,7 @@ function fillGaps(points, bucketSec, start, end) {
   const last = Math.floor((Math.min(end, Date.now() / 1000) - 1) / bucketSec) * bucketSec;
   const filled = [];
   for (let t = first; t <= last; t += bucketSec) {
-    filled.push(byT.get(t) ?? { t, co2: null, temperature: null, humidity: null, discomfort: null });
+    filled.push(byT.get(t) ?? { t, co2: null, temperature: null, humidity: null, discomfort: null, lux: null });
   }
   return filled;
 }
@@ -542,7 +566,7 @@ async function refreshHistory() {
       return;
     }
     const points = fillGaps(data.points, data.bucket_sec, data.start, data.end);
-    const fields = { "chart-co2": "co2", "chart-temp": "temperature", "chart-hum": "humidity", "chart-di": "discomfort" };
+    const fields = { "chart-co2": "co2", "chart-temp": "temperature", "chart-hum": "humidity", "chart-di": "discomfort", "chart-lux": "lux" };
     for (const [id, field] of Object.entries(fields)) {
       charts[id].data.labels = points.map(p => p.t);
       charts[id].data.datasets[0].data = points.map(p => p[field]);
@@ -564,7 +588,7 @@ function formatDuration(minutes) {
 async function refreshStats() {
   const s = await fetchJson(`/api/stats?${rangeQuery()}`);
   if (!s || !s.samples) {
-    for (const id of ["stats-co2", "stats-temp", "stats-hum", "stats-di"]) document.getElementById(id).textContent = "";
+    for (const id of ["stats-co2", "stats-temp", "stats-hum", "stats-di", "stats-lux"]) document.getElementById(id).textContent = "";
     return;
   }
   const f = v => v != null ? v : "–";
@@ -577,6 +601,9 @@ async function refreshStats() {
     `最小 ${f(s.hum_min)} · 平均 ${f(s.hum_avg)} · 最大 ${f(s.hum_max)}`;
   document.getElementById("stats-di").textContent =
     `最小 ${f(s.di_min)} · 平均 ${f(s.di_avg)} · 最大 ${f(s.di_max)}`;
+  const lx = v => v == null ? "–" : Math.round(v).toLocaleString();
+  document.getElementById("stats-lux").textContent =
+    s.lux_avg == null ? "" : `最小 ${lx(s.lux_min)} · 平均 ${lx(s.lux_avg)} · 最大 ${lx(s.lux_max)}`;
 }
 
 // その日の記録率（%）。当日は経過時間分だけを分母にする
@@ -655,6 +682,7 @@ function buildCharts() {
   });
   charts["chart-temp"] = makeChart("chart-temp", "--series-temp", { unit: "℃" });
   charts["chart-hum"] = makeChart("chart-hum", "--series-hum", { unit: "%", yMin: 0, yMax: 100 });
+  charts["chart-lux"] = makeChart("chart-lux", "--series-lux", { unit: "lx", yMin: 0 });
   charts["chart-di"] = makeChart("chart-di", "--series-di", {
     yMin: 65, yMax: 80,
     refLine: { value: 75, label: "75 不快を感じ始める", colorVar: "--status-warning" },

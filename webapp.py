@@ -42,7 +42,7 @@ def query(sql, params=()):
 
 @app.get("/api/latest")
 def latest():
-    rows = query("SELECT ts, co2, temperature, humidity FROM measurements ORDER BY ts DESC LIMIT 1")
+    rows = query("SELECT ts, co2, temperature, humidity, lux FROM measurements ORDER BY ts DESC LIMIT 1")
     if not rows:
         raise HTTPException(status_code=404, detail="まだ測定データがありません")
     result = dict(rows[0])
@@ -82,6 +82,7 @@ def history(hours: float | None = RangeHours, start: int | None = RangeStart, en
                   ROUND(AVG(co2))            AS co2,
                   ROUND(AVG(temperature), 1) AS temperature,
                   ROUND(AVG(humidity), 1)    AS humidity,
+                  ROUND(AVG(lux), 1)         AS lux,
                   ROUND(AVG({DI_SQL}), 1)    AS discomfort
            FROM measurements
            WHERE ts >= :start AND ts < :end
@@ -104,6 +105,9 @@ def stats(hours: float | None = RangeHours, start: int | None = RangeStart, end:
                   ROUND(MIN(humidity)) AS hum_min,
                   ROUND(AVG(humidity)) AS hum_avg,
                   ROUND(MAX(humidity)) AS hum_max,
+                  ROUND(MIN(lux), 1) AS lux_min,
+                  ROUND(AVG(lux), 1) AS lux_avg,
+                  ROUND(MAX(lux), 1) AS lux_max,
                   ROUND(MIN({DI_SQL}), 1) AS di_min,
                   ROUND(AVG({DI_SQL}), 1) AS di_avg,
                   ROUND(MAX({DI_SQL}), 1) AS di_max,
