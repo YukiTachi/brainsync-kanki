@@ -236,7 +236,7 @@
     <div class="chart-wrap"><canvas id="chart-di"></canvas></div>
   </div>
   <div class="card">
-    <h2><span class="key" style="border-color: var(--series-lux)"></span>照度 (lx)<span class="stats" id="stats-lux"></span></h2>
+    <h2><span class="key" style="border-color: var(--series-lux)"></span>照度 (lx・対数目盛)<span class="stats" id="stats-lux"></span></h2>
     <div class="chart-wrap"><canvas id="chart-lux"></canvas></div>
   </div>
   </div>
@@ -261,6 +261,7 @@
 "use strict";
 
 const REFRESH_MS = 60_000;
+const LUX_FLOOR = 0.1;  // 対数目盛の下限。0 lx はこの位置に描く
 // 表示期間: { hours } なら直近 N 時間、{ start, end }（UNIX秒、end は含まない）なら日時指定
 let range = { hours: 24 };
 const charts = {};
@@ -380,7 +381,13 @@ function makeChart(canvasId, colorVar, opts = {}) {
           padding: 10,
           callbacks: {
             title: items => items.length ? formatDateTime(Number(items[0].label)) : "",
-            label: ctx => ctx.raw == null ? "欠測" : `${ctx.formattedValue} ${opts.unit ?? ""}`,
+            label(ctx) {
+              const raw = ctx.dataset.rawValues?.[ctx.dataIndex];
+              const value = raw !== undefined ? raw : ctx.raw;
+              if (value == null) return "欠測";
+              const text = value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+              return `${text} ${opts.unit ?? ""}`.trim();
+            },
           },
         },
       },
@@ -393,7 +400,22 @@ function makeChart(canvasId, colorVar, opts = {}) {
             callback(value) { return formatTime(Number(this.getLabelForValue(value)), rangeSpanHours()); },
           },
         },
-        y: {
+        y: opts.logarithmic ? {
+          // 照度は暗闇から直射日光まで桁が大きく違うので対数目盛にする。
+          // 0 lx は対数では表せないため LUX_FLOOR まで持ち上げて最下段に描く
+          type: "logarithmic",
+          min: LUX_FLOOR,
+          grid: { color: cssVar("--grid"), lineWidth: 1 },
+          border: { display: false },
+          ticks: {
+            color: cssVar("--text-muted"), font: { size: 11 }, autoSkip: false,
+            callback(value) {
+              const exponent = Math.log10(value);
+              if (!Number.isInteger(exponent)) return "";
+              return value === LUX_FLOOR ? "0" : value.toLocaleString();
+            },
+          },
+        } : {
           grid: { color: cssVar("--grid"), lineWidth: 1 },
           border: { display: false },
           ticks: { color: cssVar("--text-muted"), maxTicksLimit: 5, font: { size: 11 } },
@@ -568,8 +590,14 @@ async function refreshHistory() {
     const points = fillGaps(data.points, data.bucket_sec, data.start, data.end);
     const fields = { "chart-co2": "co2", "chart-temp": "temperature", "chart-hum": "humidity", "chart-di": "discomfort", "chart-lux": "lux" };
     for (const [id, field] of Object.entries(fields)) {
+      const values = points.map(p => p[field]);
+      const dataset = charts[id].data.datasets[0];
       charts[id].data.labels = points.map(p => p.t);
-      charts[id].data.datasets[0].data = points.map(p => p[field]);
+      dataset.rawValues = values;
+      // 対数目盛のグラフでは 0 を描けないので最下段の値に置き換える
+      dataset.data = id === "chart-lux"
+        ? values.map(v => v == null ? null : Math.max(v, LUX_FLOOR))
+        : values;
       charts[id].update();
     }
     const label = `表示中: ${describeRange(data.start, data.end)}`;
@@ -682,7 +710,7 @@ function buildCharts() {
   });
   charts["chart-temp"] = makeChart("chart-temp", "--series-temp", { unit: "℃" });
   charts["chart-hum"] = makeChart("chart-hum", "--series-hum", { unit: "%", yMin: 0, yMax: 100 });
-  charts["chart-lux"] = makeChart("chart-lux", "--series-lux", { unit: "lx", yMin: 0 });
+  charts["chart-lux"] = makeChart("chart-lux", "--series-lux", { unit: "lx", logarithmic: true });
   charts["chart-di"] = makeChart("chart-di", "--series-di", {
     yMin: 65, yMax: 80,
     refLine: { value: 75, label: "75 不快を感じ始める", colorVar: "--status-warning" },
